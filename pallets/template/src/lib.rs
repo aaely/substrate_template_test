@@ -4,7 +4,6 @@
 /// Learn more about FRAME and the core library of Substrate FRAME pallets:
 /// <https://substrate.dev/docs/en/knowledgebase/runtime/frame>
 pub use pallet::*;
-
 #[cfg(test)]
 mod mock;
 
@@ -16,9 +15,36 @@ mod benchmarking;
 
 #[frame_support::pallet]
 pub mod pallet {
-	use frame_support::{dispatch::DispatchResult, pallet_prelude::*};
+	//use frame_benchmarking::log::kv::Value;
+use frame_support::{dispatch::DispatchResult, pallet_prelude::*};
 	use frame_system::pallet_prelude::*;
-	use sp_std::vec::Vec;
+	use sp_std::{vec::Vec, fmt::*};
+	
+
+	#[derive(Debug, Clone, PartialEq, Default, Encode, Decode)]
+	pub struct Book<AccountId> {
+		author: AccountId,
+		title: Vec<u8>,
+		cover_image_hash: Vec<u8>,
+		total_chapters: u32,
+		total_pages: u32,
+	}
+
+	#[derive(Debug, Clone, PartialEq, Default, Encode, Decode)]
+	pub struct Chapter<AccountId> {
+		book_ref: AccountId,
+		chapter_id: u32,
+		description: Vec<u8>,
+		pages: Vec<u32>,
+	}
+
+	#[derive(Debug, Clone, PartialEq, Default, Encode, Decode)]
+	pub struct Page<AccountId> {
+		book_ref: AccountId,
+		chapter: u32,
+		page_num: u32,
+		content: Vec<u8>,
+	}
 
 	/// Configure the pallet by specifying the parameters and types on which it depends.
 	#[pallet::config]
@@ -34,21 +60,21 @@ pub mod pallet {
 	// The pallet's runtime storage items.
 	// https://substrate.dev/docs/en/knowledgebase/runtime/storage
 	#[pallet::storage]
+	#[pallet::getter(fn get_book)]
 	// Learn more about declaring storage items:
 	// https://substrate.dev/docs/en/knowledgebase/runtime/storage#declaring-storage-items
-	pub type Books<T: Config> = StorageMap<_, Twox64Concat, u32, Book<T::AccountId>>;
-	
-	#[pallet::storage]
-	pub type NextBook<T> = StorageValue<_, u32>;
+	pub (super) type Books<T: Config> = StorageMap<_, Twox64Concat, T::AccountId, Book<T::AccountId>, ValueQuery>;
 
 	#[pallet::storage]
-	pub type Chapters<T: Config> = StorageMap<_, Twox64Concat, u32, Chapter>;
+	#[pallet::getter(fn get_chapter)]
+	pub (super) type Chapters<T: Config> = StorageDoubleMap<_, Twox64Concat, T::AccountId, Twox64Concat, u32, Chapter<T::AccountId>, ValueQuery>;
 
 	#[pallet::storage]
 	pub type NextChapter<T> = StorageValue<_, u32>;
 
 	#[pallet::storage]
-	pub type Pages<T: Config> = StorageMap<_, Twox64Concat, u32, Page>;
+	#[pallet::getter(fn get_page)]
+	pub (super) type Pages<T: Config> = StorageDoubleMap<_, Twox64Concat, T::AccountId, Twox64Concat, u32, Page<T::AccountId>, ValueQuery>;
 
 	#[pallet::storage]
 	pub type NextPage<T> = StorageValue<_, u32>;
@@ -61,9 +87,7 @@ pub mod pallet {
 	pub enum Event<T: Config> {
 		/// Event documentation should end with an array that provides descriptive names for event
 		/// parameters. [something, who]
-		NewBook(u32, Book::<T::AccountId>),
-		NewChapter(u32, Chapter),
-		NewPage(u32, Page),
+		BookCreated(T::AccountId),
 	}
 
 	// Errors inform users that something went wrong.
@@ -72,8 +96,11 @@ pub mod pallet {
 		/// Error names should be descriptive.
 		NoneValue,
 		/// Errors should have helpful documentation associated with them.
-		StorageOverflow,
+		InvalidChapter,
 	}
+
+	#[pallet::hooks]
+    impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {}
 
 	// Dispatchable functions allows users to interact with the pallet and invoke state changes.
 	// These functions materialize as "extrinsics", which are often compared to transactions.
@@ -82,99 +109,66 @@ pub mod pallet {
 	impl<T: Config> Pallet<T> {
 		/// An example dispatchable that takes a singles value as a parameter, writes the value to
 		/// storage and emits an event. This function must be dispatched by a signed extrinsic.
-		#[pallet::weight(0)]
-		pub fn new_book(origin: OriginFor<T>, title: Vec<u8>, cover_image_hash: Vec<u8>) -> DispatchResult {
+		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1))]
+		pub fn create_book(origin: OriginFor<T>, title: Vec<u8>, cover_image_hash: Vec<u8>) -> DispatchResult {
 			// Check that the extrinsic was signed and get the signer.
 			// This function will return an error if the extrinsic is not signed.
 			// https://substrate.dev/docs/en/knowledgebase/runtime/origin
 			let who = ensure_signed(origin)?;
-
+			let page_count = NextPage::<T>::get().unwrap_or(0);
+			let chapter_count = NextChapter::<T>::get().unwrap_or(0);
+			let _who = who.clone();
+			let _who1 = who.clone();
 			// Update storage.
-			let book: u32 = NextBook::<T>::get().unwrap_or(0);
-			Books::<T>::insert(book, Book::<T::AccountId> {
+			Books::<T>::insert(_who, Book {
 				author: who,
-				book_ref: book,
 				title,
 				cover_image_hash,
+				total_chapters: chapter_count,
+				total_pages: page_count,
 			});
-			NextBook::<T>::put(book + 1);
+
 			// Emit an event.
+			Self::deposit_event(Event::BookCreated(_who1));
 			// Return a successful DispatchResultWithPostInfo
 			Ok(())
 		}
 
-		#[pallet::weight(0)]
-		pub fn new_chapter(origin: OriginFor<T>, description: Vec<u8>) -> DispatchResult {
-			// Check that the extrinsic was signed and get the signer.
-			// This function will return an error if the extrinsic is not signed.
-			// https://substrate.dev/docs/en/knowledgebase/runtime/origin
-			let who = ensure_signed(origin)?;
-
-			// Update storage.
-			let chapter: u32 = NextChapter::<T>::get().unwrap_or(0);
-			let new_slice: Vec<u32> = Vec::new();
-			let book_id: u32 = NextBook::<T>::get().unwrap_or(0);
-			Chapters::<T>::insert(chapter, Chapter {
+		/// An example dispatchable that may throw a custom error.
+		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,2))]
+		pub fn create_chapter(origin: OriginFor<T>, book_ref: T::AccountId, description: Vec<u8>) -> DispatchResult {
+			let _who = ensure_signed(origin)?;
+			let chapter = NextChapter::<T>::get().unwrap_or(0);
+			let _ref = book_ref.clone();
+			let _ref1 = book_ref.clone();
+			Chapters::<T>::insert(_ref, chapter, Chapter {
+				book_ref: _who,
 				chapter_id: chapter,
-				book_ref: book_id,
 				description,
-				pages: new_slice,
+				pages: Vec::new(),
 			});
 			NextChapter::<T>::put(chapter + 1);
-			// Emit an event.
-			// Return a successful DispatchResultWithPostInfo
+
 			Ok(())
 		}
 
-		#[pallet::weight(0)]
-		pub fn new_page(origin: OriginFor<T>, content: Vec<u8>, book: u32, chapter: u32) -> DispatchResult {
-			// Check that the extrinsic was signed and get the signer.
-			// This function will return an error if the extrinsic is not signed.
-			// https://substrate.dev/docs/en/knowledgebase/runtime/origin
-			let who = ensure_signed(origin)?;
-
-			// Update storage.
-			let page: u32 = NextPage::<T>::get().unwrap_or(0);
-			Pages::<T>::insert(page, Page {
-				book_ref: book,
-				page_number: page,
-				chapter_id: chapter,
+		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(2,3))]
+		pub fn create_page(origin: OriginFor<T>, book_ref: T::AccountId, chapter: u32, content: Vec<u8>) -> DispatchResult {
+			let _who = ensure_signed(origin)?;
+			let _ref = &book_ref.clone();
+			let page = NextPage::<T>::get().unwrap_or(0);
+			let mut _chapter = Chapters::<T>::get(_ref, chapter);
+			ensure!(_chapter.chapter_id.ge(&0), Error::<T>::InvalidChapter);
+			Pages::<T>::insert(_ref, page, Page {
+				book_ref: _who,
+				chapter,
+				page_num: page,
 				content,
 			});
+			_chapter.pages.push(page);
+			Chapters::<T>::insert(_ref, chapter, _chapter);
 			NextPage::<T>::put(page + 1);
-			// Emit an event.
-			// Return a successful DispatchResultWithPostInfo
 			Ok(())
-		}
-	}
-
-	use v1::{Book, Chapter, Page};
-	pub mod v1 {
-		use codec::{Encode, Decode};
-		use sp_std::vec::Vec;
-
-		#[derive(Encode, Decode, Debug, Clone, PartialEq)]
-		pub struct Book<AccountId> {
-			pub title: Vec<u8>,
-			pub book_ref: u32,
-			pub cover_image_hash: Vec<u8>,
-			pub author: AccountId,
-		}
-
-		#[derive(Encode, Decode, Debug, Clone, PartialEq)]
-		pub struct Chapter {
-			pub book_ref: u32,
-			pub chapter_id: u32,
-			pub description: Vec<u8>,
-			pub pages: Vec<u32>,
-		}
-
-		#[derive(Encode, Decode, Debug, Clone, PartialEq)]
-		pub struct Page {
-			pub book_ref: u32,
-			pub page_number: u32,
-			pub chapter_id: u32,
-			pub content: Vec<u8>,
 		}
 	}
 }
