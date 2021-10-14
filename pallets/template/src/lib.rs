@@ -19,6 +19,7 @@ pub mod pallet {
 use frame_support::{dispatch::DispatchResult, pallet_prelude::*};
 	use frame_system::pallet_prelude::*;
 	use sp_std::{vec::Vec, fmt::*};
+	//use uuid::Uuid;
 	
 
 	#[derive(Debug, Clone, PartialEq, Default, Encode, Decode)]
@@ -70,14 +71,14 @@ use frame_support::{dispatch::DispatchResult, pallet_prelude::*};
 	pub (super) type Chapters<T: Config> = StorageDoubleMap<_, Twox64Concat, T::AccountId, Twox64Concat, u32, Chapter<T::AccountId>, ValueQuery>;
 
 	#[pallet::storage]
-	pub type NextChapter<T> = StorageValue<_, u32>;
+	pub type NextChapter<T: Config> = StorageMap<_, Twox64Concat, T::AccountId, u32>;
 
 	#[pallet::storage]
 	#[pallet::getter(fn get_page)]
 	pub (super) type Pages<T: Config> = StorageDoubleMap<_, Twox64Concat, T::AccountId, Twox64Concat, u32, Page<T::AccountId>, ValueQuery>;
 
 	#[pallet::storage]
-	pub type NextPage<T> = StorageValue<_, u32>;
+	pub type NextPage<T: Config> = StorageMap<_, Twox64Concat, T::AccountId, u32>;
 
 	// Pallets use events to inform users when important changes are made.
 	// https://substrate.dev/docs/en/knowledgebase/runtime/events
@@ -88,6 +89,8 @@ use frame_support::{dispatch::DispatchResult, pallet_prelude::*};
 		/// Event documentation should end with an array that provides descriptive names for event
 		/// parameters. [something, who]
 		BookCreated(T::AccountId),
+		ChapterCreated(u32, T::AccountId),
+		PageCreated(u32, u32, T::AccountId),
 	}
 
 	// Errors inform users that something went wrong.
@@ -115,12 +118,13 @@ use frame_support::{dispatch::DispatchResult, pallet_prelude::*};
 			// This function will return an error if the extrinsic is not signed.
 			// https://substrate.dev/docs/en/knowledgebase/runtime/origin
 			let who = ensure_signed(origin)?;
-			let page_count = NextPage::<T>::get().unwrap_or(0);
-			let chapter_count = NextChapter::<T>::get().unwrap_or(0);
-			let _who = who.clone();
-			let _who1 = who.clone();
+			let who1 = who.clone();
+			let who2 = who.clone();
+			let page_count = NextPage::<T>::get(who.clone()).unwrap_or(0);
+			let chapter_count = NextChapter::<T>::get(who.clone()).unwrap_or(0);
+			//let _uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, &title);
 			// Update storage.
-			Books::<T>::insert(_who, Book {
+			Books::<T>::insert(who2, Book {
 				author: who,
 				title,
 				cover_image_hash,
@@ -129,7 +133,7 @@ use frame_support::{dispatch::DispatchResult, pallet_prelude::*};
 			});
 
 			// Emit an event.
-			Self::deposit_event(Event::BookCreated(_who1));
+			Self::deposit_event(Event::BookCreated(who1));
 			// Return a successful DispatchResultWithPostInfo
 			Ok(())
 		}
@@ -138,7 +142,7 @@ use frame_support::{dispatch::DispatchResult, pallet_prelude::*};
 		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,2))]
 		pub fn create_chapter(origin: OriginFor<T>, book_ref: T::AccountId, description: Vec<u8>) -> DispatchResult {
 			let _who = ensure_signed(origin)?;
-			let chapter = NextChapter::<T>::get().unwrap_or(0);
+			let chapter = NextChapter::<T>::get(_who.clone()).unwrap_or(0);
 			let _ref = book_ref.clone();
 			let _ref1 = book_ref.clone();
 			Chapters::<T>::insert(_ref, chapter, Chapter {
@@ -147,16 +151,22 @@ use frame_support::{dispatch::DispatchResult, pallet_prelude::*};
 				description,
 				pages: Vec::new(),
 			});
-			NextChapter::<T>::put(chapter + 1);
-
+			NextChapter::<T>::insert(book_ref.clone(), chapter + 1);
+			let mut book = Books::<T>::get(book_ref.clone());
+			book.total_pages += 1;
+			let pages = book.total_pages.clone();
+			Books::<T>::insert(book_ref.clone(), book);
+			Self::deposit_event(Event::ChapterCreated(pages, book_ref.clone()));
 			Ok(())
 		}
 
 		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(2,3))]
 		pub fn create_page(origin: OriginFor<T>, book_ref: T::AccountId, chapter: u32, content: Vec<u8>) -> DispatchResult {
 			let _who = ensure_signed(origin)?;
+			let _who1 = _who.clone();
+
 			let _ref = &book_ref.clone();
-			let page = NextPage::<T>::get().unwrap_or(0);
+			let page = NextPage::<T>::get(_who.clone()).unwrap_or(0);
 			let mut _chapter = Chapters::<T>::get(_ref, chapter);
 			ensure!(_chapter.chapter_id.ge(&0), Error::<T>::InvalidChapter);
 			Pages::<T>::insert(_ref, page, Page {
@@ -167,7 +177,12 @@ use frame_support::{dispatch::DispatchResult, pallet_prelude::*};
 			});
 			_chapter.pages.push(page);
 			Chapters::<T>::insert(_ref, chapter, _chapter);
-			NextPage::<T>::put(page + 1);
+			NextPage::<T>::insert(_who1, page + 1);
+			let mut book = Books::<T>::get(book_ref.clone());
+			book.total_pages +=1;
+			let pages = book.total_pages.clone();
+			Books::<T>::insert(book_ref.clone(), book);
+			Self::deposit_event(Event::PageCreated(pages, chapter.clone(), book_ref.clone()));
 			Ok(())
 		}
 	}
