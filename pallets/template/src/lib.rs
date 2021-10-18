@@ -16,35 +16,85 @@ mod benchmarking;
 #[frame_support::pallet]
 pub mod pallet {
 	//use frame_benchmarking::log::kv::Value;
-use frame_support::{dispatch::DispatchResult, pallet_prelude::*};
-	use frame_system::pallet_prelude::*;
-	use sp_std::{vec::Vec, fmt::*};
-	//use uuid::Uuid;
+use frame_support::pallet_prelude::*;
+use frame_system::pallet_prelude::*;
+	
+	use sp_std::prelude::*;
 	
 
 	#[derive(Debug, Clone, PartialEq, Default, Encode, Decode)]
-	pub struct Book<AccountId> {
-		author: AccountId,
-		title: Vec<u8>,
-		cover_image_hash: Vec<u8>,
-		total_chapters: u32,
-		total_pages: u32,
+	pub struct Peptide<AccountId> {
+		created_by: AccountId,
+		id: u128,
+		name: Vec<u8>,
+		price: u32,
+		inventory: u32,
 	}
 
 	#[derive(Debug, Clone, PartialEq, Default, Encode, Decode)]
-	pub struct Chapter<AccountId> {
-		book_ref: AccountId,
-		chapter_id: u32,
+	pub struct PeptideProfile<AminoAcid> {
+		peptide_ref: u128,
+		chain: Vec<AminoAcid>,
+		production_cost: u32,
+		production_yield: u32,
+	}
+
+	#[derive(Debug, Clone, PartialEq, Default, Encode, Decode)]
+	pub struct AminoAcid {
+		id: u128,
+		name: Vec<u8>,
+		cost: u32,
+	}
+
+	#[derive(Debug, Clone, PartialEq, Encode, Decode)]
+	pub struct CannabisProduct {
+		id: u128,
+		name: Vec<u8>,
+		price: u32,
+		category: CannabisCategory,
+		inventory: u32,
+		image_hash: Vec<u8>,
+		cannabinoids: Vec<(u128, u32)>,
+		terpenes: Vec<(u128, u32)>,
+	}
+
+	impl Default for CannabisProduct {
+		fn default() -> Self {
+			CannabisProduct {
+				id: Default::default(),
+				name: Default::default(),
+				price: Default::default(),
+				category: CannabisCategory::Flower,
+				inventory: Default::default(),
+				image_hash: Default::default(),
+				cannabinoids: Default::default(),
+				terpenes: Default::default(),
+			}
+
+		}
+	}
+
+	#[derive(Debug, Clone, PartialEq, Default, Encode, Decode)]
+	pub struct Cannabinoid {
+		id: u128,
+		name: Vec<u8>,
 		description: Vec<u8>,
-		pages: Vec<u32>,
+		products: Vec<(u128, u32)>,
 	}
 
 	#[derive(Debug, Clone, PartialEq, Default, Encode, Decode)]
-	pub struct Page<AccountId> {
-		book_ref: AccountId,
-		chapter: u32,
-		page_num: u32,
-		content: Vec<u8>,
+	pub struct Terpene {
+		id: u128,
+		name: Vec<u8>,
+		description: Vec<u8>,
+		products: Vec<(u128, u32)>,
+	}
+
+	#[derive(Debug, Clone, PartialEq, Encode, Decode)]
+	pub enum CannabisCategory {
+		Flower,
+		CO2Extract,
+		ButaneExtract,
 	}
 
 	/// Configure the pallet by specifying the parameters and types on which it depends.
@@ -61,24 +111,39 @@ use frame_support::{dispatch::DispatchResult, pallet_prelude::*};
 	// The pallet's runtime storage items.
 	// https://substrate.dev/docs/en/knowledgebase/runtime/storage
 	#[pallet::storage]
-	#[pallet::getter(fn get_book)]
+	#[pallet::getter(fn get_peptide)]
 	// Learn more about declaring storage items:
 	// https://substrate.dev/docs/en/knowledgebase/runtime/storage#declaring-storage-items
-	pub (super) type Books<T: Config> = StorageMap<_, Twox64Concat, T::AccountId, Book<T::AccountId>, ValueQuery>;
+	pub (super) type Peptides<T: Config> = StorageMap<_, Twox64Concat, u128, (Peptide<T::AccountId>, PeptideProfile<AminoAcid>), ValueQuery>;
 
 	#[pallet::storage]
-	#[pallet::getter(fn get_chapter)]
-	pub (super) type Chapters<T: Config> = StorageDoubleMap<_, Twox64Concat, T::AccountId, Twox64Concat, u32, Chapter<T::AccountId>, ValueQuery>;
+	#[pallet::getter(fn get_amino)]
+	pub (super) type AminoAcids<T> = StorageMap<_, Twox64Concat, u128, AminoAcid, ValueQuery>;
 
 	#[pallet::storage]
-	pub type NextChapter<T: Config> = StorageMap<_, Twox64Concat, T::AccountId, u32>;
+	pub type PeptideByCount<T: Config> = StorageMap<_, Twox64Concat, u32, (Peptide<T::AccountId>, PeptideProfile<AminoAcid>)>;
 
 	#[pallet::storage]
-	#[pallet::getter(fn get_page)]
-	pub (super) type Pages<T: Config> = StorageDoubleMap<_, Twox64Concat, T::AccountId, Twox64Concat, u32, Page<T::AccountId>, ValueQuery>;
+	pub (super) type AminoAcidByCount<T> = StorageMap<_, Twox64Concat, u32, AminoAcid>;
 
 	#[pallet::storage]
-	pub type NextPage<T: Config> = StorageMap<_, Twox64Concat, T::AccountId, u32>;
+	pub type PeptideCount<T: Config> = StorageValue<_, u32>;
+
+	#[pallet::storage]
+	pub (super) type AminoAcidCount<T> = StorageValue<_, u32>;
+	
+	#[pallet::storage]
+	#[pallet::getter(fn get_cannabis_product)]
+	pub (super) type CannabisProducts<T> = StorageMap<_, Twox64Concat, u128, CannabisProduct>;
+
+	#[pallet::storage]
+	pub type CannabisCount<T: Config> = StorageValue<_, u32>;
+
+	#[pallet::storage]
+	pub (super) type Terpenes<T> = StorageMap<_, Twox64Concat, u128, Terpene>;
+
+	#[pallet::storage]
+	pub (super) type Cannabinoids<T> = StorageMap<_, Twox64Concat, u128, Cannabinoid>;
 
 	// Pallets use events to inform users when important changes are made.
 	// https://substrate.dev/docs/en/knowledgebase/runtime/events
@@ -88,9 +153,9 @@ use frame_support::{dispatch::DispatchResult, pallet_prelude::*};
 	pub enum Event<T: Config> {
 		/// Event documentation should end with an array that provides descriptive names for event
 		/// parameters. [something, who]
-		BookCreated(T::AccountId),
-		ChapterCreated(u32, T::AccountId),
-		PageCreated(u32, u32, T::AccountId),
+		NewPeptide(u32, T::AccountId),
+		NewAmino(u32, T::AccountId),
+		PeptideInventoryUpdate((Peptide<T::AccountId>, PeptideProfile<AminoAcid>)),
 	}
 
 	// Errors inform users that something went wrong.
@@ -100,6 +165,7 @@ use frame_support::{dispatch::DispatchResult, pallet_prelude::*};
 		NoneValue,
 		/// Errors should have helpful documentation associated with them.
 		InvalidChapter,
+		InsufficientAmount,
 	}
 
 	#[pallet::hooks]
@@ -112,78 +178,209 @@ use frame_support::{dispatch::DispatchResult, pallet_prelude::*};
 	impl<T: Config> Pallet<T> {
 		/// An example dispatchable that takes a singles value as a parameter, writes the value to
 		/// storage and emits an event. This function must be dispatched by a signed extrinsic.
-		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1))]
-		pub fn create_book(origin: OriginFor<T>, title: Vec<u8>, cover_image_hash: Vec<u8>) -> DispatchResult {
-			// Check that the extrinsic was signed and get the signer.
-			// This function will return an error if the extrinsic is not signed.
-			// https://substrate.dev/docs/en/knowledgebase/runtime/origin
-			let who = ensure_signed(origin)?;
-			let who1 = who.clone();
-			let who2 = who.clone();
-			let page_count = NextPage::<T>::get(who.clone()).unwrap_or(0);
-			let chapter_count = NextChapter::<T>::get(who.clone()).unwrap_or(0);
-			//let _uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, &title);
-			// Update storage.
-			Books::<T>::insert(who2, Book {
-				author: who,
-				title,
-				cover_image_hash,
-				total_chapters: chapter_count,
-				total_pages: page_count,
-			});
-
-			// Emit an event.
-			Self::deposit_event(Event::BookCreated(who1));
-			// Return a successful DispatchResultWithPostInfo
-			Ok(())
-		}
-
-		/// An example dispatchable that may throw a custom error.
 		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,2))]
-		pub fn create_chapter(origin: OriginFor<T>, book_ref: T::AccountId, description: Vec<u8>) -> DispatchResult {
-			let _who = ensure_signed(origin)?;
-			let chapter = NextChapter::<T>::get(_who.clone()).unwrap_or(0);
-			let _ref = book_ref.clone();
-			let _ref1 = book_ref.clone();
-			Chapters::<T>::insert(_ref, chapter, Chapter {
-				book_ref: _who,
-				chapter_id: chapter,
-				description,
-				pages: Vec::new(),
-			});
-			NextChapter::<T>::insert(book_ref.clone(), chapter + 1);
-			let mut book = Books::<T>::get(book_ref.clone());
-			book.total_pages += 1;
-			let pages = book.total_pages.clone();
-			Books::<T>::insert(book_ref.clone(), book);
-			Self::deposit_event(Event::ChapterCreated(pages, book_ref.clone()));
+		pub fn create_peptide(
+			origin: OriginFor<T>, 
+			name: Vec<u8>, 
+			id: u128, 
+			price: u32, 
+			inventory: u32, 
+			chain: Vec<AminoAcid>) -> DispatchResult {
+				// Check that the extrinsic was signed and get the signer.
+				// This function will return an error if the extrinsic is not signed.
+				// https://substrate.dev/docs/en/knowledgebase/runtime/origin
+				let who = ensure_signed(origin)?;
+				let who1 = &who.clone();
+				let who2 = who.clone();
+				let count = PeptideCount::<T>::get().unwrap_or(0);
+				let production_cost = Self::production_cost_calc(&chain).0;
+				let production_yield = Self::production_cost_calc(&chain).1;
+				let name1 = name.clone();
+				let chain1 = chain.clone();
+				// Update storage.
+				Peptides::<T>::insert(id, (Peptide {
+					created_by: who,
+					id,
+					name,
+					price,
+					inventory,
+				}, PeptideProfile {
+					peptide_ref: id.clone(),
+					chain,
+					production_cost,
+					production_yield,
+				}));
+
+				PeptideByCount::<T>::insert(count.clone(), (Peptide {
+					created_by: who1.clone(),
+					id,
+					name: name1,
+					price,
+					inventory,
+				}, PeptideProfile {
+					peptide_ref: id.clone(),
+					chain: chain1,
+					production_cost,
+					production_yield,
+				}));
+
+				PeptideCount::<T>::put(count + 1);
+
+				// Emit an event
+				Self::deposit_event(Event::NewPeptide(count.clone(), who2));
+				// Return a successful DispatchResultWithPostInfo
+				Ok(())
+			}
+		
+		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1))]
+		pub fn update_peptide_inventory(origin: OriginFor<T>, id: u128, inventory: u32) -> DispatchResult {
+			let who = ensure_signed(origin)?;
+			let mut peptide = Self::get_peptide(id);
+			peptide.0.inventory = inventory;
+			Self::deposit_event(Event::PeptideInventoryUpdate(peptide.clone()));
+			Peptides::<T>::insert(id, peptide);
 			Ok(())
 		}
 
-		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(2,3))]
-		pub fn create_page(origin: OriginFor<T>, book_ref: T::AccountId, chapter: u32, content: Vec<u8>) -> DispatchResult {
-			let _who = ensure_signed(origin)?;
-			let _who1 = _who.clone();
-
-			let _ref = &book_ref.clone();
-			let page = NextPage::<T>::get(_who.clone()).unwrap_or(0);
-			let mut _chapter = Chapters::<T>::get(_ref, chapter);
-			ensure!(_chapter.chapter_id.ge(&0), Error::<T>::InvalidChapter);
-			Pages::<T>::insert(_ref, page, Page {
-				book_ref: _who,
-				chapter,
-				page_num: page,
-				content,
-			});
-			_chapter.pages.push(page);
-			Chapters::<T>::insert(_ref, chapter, _chapter);
-			NextPage::<T>::insert(_who1, page + 1);
-			let mut book = Books::<T>::get(book_ref.clone());
-			book.total_pages +=1;
-			let pages = book.total_pages.clone();
-			Books::<T>::insert(book_ref.clone(), book);
-			Self::deposit_event(Event::PageCreated(pages, chapter.clone(), book_ref.clone()));
+		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,3))]
+		pub fn create_amino(
+			origin: OriginFor<T>, 
+			name: Vec<u8>, 
+			id: u128, 
+			cost: u32) -> DispatchResult {
+				let who = ensure_signed(origin)?;
+				let count = AminoAcidCount::<T>::get().unwrap_or(0);
+				let count1 = count.clone();
+				let id1 = id.clone();
+				let cost1 = cost.clone();
+				let name1 = name.clone();
+				AminoAcids::<T>::insert(id, AminoAcid {
+					id,
+					name,
+					cost,
+				});
+				AminoAcidByCount::<T>::insert(count, AminoAcid {
+					id: id1,
+					name: name1,
+					cost: cost1,
+				});
+				Self::deposit_event(Event::NewAmino(count1.clone(), who));
+				AminoAcidCount::<T>::put(count1.clone() + 1);
+				Ok(())
+			}
+		
+		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,2))]
+		pub fn buy_products(origin: OriginFor<T>, total: u32, peptides: Vec<u128>, cannabis: Vec<u128>) -> DispatchResult {
+			let who = ensure_signed(origin)?;
+			let total_cost = Self::get_purchase_total(&peptides, &cannabis);
+			ensure!(total >= total_cost, Error::<T>::InsufficientAmount);
+			
 			Ok(())
 		}
+
+		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,2))]
+		pub fn new_cannabis_product(
+			origin: OriginFor<T>, 
+			id: u128, 
+			name: Vec<u8>, 
+			price: u32, 
+			category: CannabisCategory, 
+			inventory: u32, 
+			image_hash: Vec<u8>, 
+			cannabinoids: Vec<(u128, u32)>, 
+			terpenes: Vec<(u128, u32)>) -> DispatchResult {
+				let who = ensure_signed(origin)?;
+				Self::add_product_to_cannabinoid(&id, &cannabinoids);
+				Self::add_product_to_terpene(&id, &terpenes);
+				CannabisProducts::<T>::insert(id, CannabisProduct {
+					id,
+					name,
+					price,
+					category,
+					inventory,
+					image_hash,
+					cannabinoids,
+					terpenes,
+				});
+				Ok(())
+		}
+		
+		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,2))]
+		pub fn new_terpene(
+			origin: OriginFor<T>, 
+			id: u128, 
+			name: Vec<u8>, 
+			description: Vec<u8>) -> DispatchResult {
+				let who = ensure_signed(origin)?;
+				Terpenes::<T>::insert(id, Terpene {
+					id,
+					name,
+					description,
+					products: Vec::new(),
+				});
+				Ok(())
+		}
+		
+		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,2))]
+		pub fn new_cannabinoid(
+			origin: OriginFor<T>, 
+			id: u128, 
+			name: Vec<u8>, 
+			description: Vec<u8>) -> DispatchResult {
+				let who = ensure_signed(origin)?;
+				Cannabinoids::<T>::insert(id, Cannabinoid {
+					id,
+					name,
+					description,
+					products: Vec::new(),
+				});
+				Ok(())
+		}
+	}
+
+	impl<T: Config> Pallet<T> {
+		//helpers
+		pub fn production_cost_calc(amino_chain: &Vec<AminoAcid>) -> (u32, u32) {
+			let mut total: u32 = 0;
+			let mut yld: f64 = 0.97;
+			for amino in amino_chain {
+				total += total + amino.cost;
+				yld = yld * 0.97
+			}
+			yld = yld / 0.97;
+			yld = yld * 100.0;
+			(total, yld as u32)
+		}
+
+		pub fn add_product_to_terpene(id: &u128, terpenes: &Vec<(u128, u32)>) {
+			for t in terpenes {
+				let mut terp = Terpenes::<T>::get(t.0).unwrap_or(Default::default());
+				terp.products.push((*id, t.1));
+				Terpenes::<T>::insert(t.0, terp);
+			}
+		}
+
+		pub fn add_product_to_cannabinoid(id: &u128, cannabinoids: &Vec<(u128, u32)>) {
+			for c in cannabinoids {
+				let mut cann = Cannabinoids::<T>::get(c.0).unwrap_or(Default::default());
+				cann.products.push((*id, c.1));
+				Cannabinoids::<T>::insert(c.0, cann);
+			}
+		}
+
+		pub fn get_purchase_total(peptides: &Vec<u128>, cannabis: &Vec<u128>) -> u32 {
+			let mut total: u32 = 0;
+			for id in peptides {
+				let pep = Self::get_peptide(id);
+				total += pep.0.price;
+			}
+			for _id in cannabis {
+				let cann = Self::get_cannabis_product(_id).unwrap_or(Default::default());
+				total += cann.price;
+			}
+			total
+		}
+
+		
 	}
 }
