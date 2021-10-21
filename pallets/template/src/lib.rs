@@ -16,12 +16,49 @@ mod benchmarking;
 #[frame_support::pallet]
 pub mod pallet {
 	//use frame_benchmarking::log::kv::Value;
-use frame_support::{pallet_prelude::*, traits::Get};
+use frame_support::pallet_prelude::*;
 use frame_system::{pallet_prelude::*};
+use codec::{Encode, Decode};
 	
 	use sp_runtime::offchain::storage::StorageValueRef;
 use sp_std::prelude::*;
 	
+	#[derive(Debug, Clone, PartialEq, Default, Encode, Decode)]
+	pub struct User<AccountId, PhoneNumber, Email, Order> {
+		address: AccountId,
+		fname: Vec<u8>,
+		lname: Vec<u8>,
+		phone: Vec<PhoneNumber>,
+		preferred_phone: u32,
+		email: Vec<Email>,
+		preferred_email: u32,
+		inventory: u32,
+		image_hash: Vec<u8>,
+		orders: Vec<Order>,
+	}
+
+	#[derive(Debug, Clone, PartialEq, Default, Encode, Decode)]
+	pub struct PhoneNumber<AccountId> {
+		user: AccountId,
+		phone_type: Vec<u8>,
+		number: Vec<u8>,
+	}
+
+	#[derive(Debug, Clone, PartialEq, Default, Encode, Decode)]
+	pub struct Email<AccountId> {
+		user: AccountId,
+		email: Vec<u8>,
+	}
+
+	#[derive(Debug, Clone, PartialEq, Default, Encode, Decode)]
+	pub struct Order<AccountId> {
+		id: u128,
+		user: AccountId,
+		cannabis_products: Vec<(u128, u32)>,
+		peptide_products: Vec<(u128, u32)>,
+		total: u32,
+		date: Vec<u8>,
+	}
 
 	#[derive(Debug, Clone, PartialEq, Default, Encode, Decode)]
 	pub struct Peptide<AccountId> {
@@ -163,6 +200,18 @@ use sp_std::prelude::*;
 
 	#[pallet::storage]
 	pub (super) type CannabinoidCount<T> = StorageValue<_, u32>;
+
+	#[pallet::storage]
+	#[pallet::getter(fn get_admin)]
+	pub (super) type Admins<T: Config> = StorageMap<_, Twox64Concat, T::AccountId, bool, ValueQuery>;
+
+	#[pallet::storage]
+	#[pallet::getter(fn get_user_access)]
+	pub (super) type UserAccess<T: Config> = StorageMap<_, Twox64Concat, T::AccountId, bool, ValueQuery>;
+
+	#[pallet::storage]
+	#[pallet::getter(fn get_user)]
+	pub (super) type Users<T: Config> = StorageMap<_, Twox64Concat, T::AccountId, User<T::AccountId, PhoneNumber<T::AccountId>, Email<T::AccountId>, Order<T::AccountId>>, ValueQuery>;
 
 	// Pallets use events to inform users when important changes are made.
 	// https://substrate.dev/docs/en/knowledgebase/runtime/events
