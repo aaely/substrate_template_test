@@ -16,10 +16,11 @@ mod benchmarking;
 #[frame_support::pallet]
 pub mod pallet {
 	//use frame_benchmarking::log::kv::Value;
-use frame_support::pallet_prelude::*;
-use frame_system::pallet_prelude::*;
+use frame_support::{pallet_prelude::*, traits::Get};
+use frame_system::{pallet_prelude::*};
 	
-	use sp_std::prelude::*;
+	use sp_runtime::offchain::storage::StorageValueRef;
+use sp_std::prelude::*;
 	
 
 	#[derive(Debug, Clone, PartialEq, Default, Encode, Decode)]
@@ -29,6 +30,7 @@ use frame_system::pallet_prelude::*;
 		name: Vec<u8>,
 		price: u32,
 		inventory: u32,
+		image_hash: Vec<u8>,
 	}
 
 	#[derive(Debug, Clone, PartialEq, Default, Encode, Decode)]
@@ -140,10 +142,27 @@ use frame_system::pallet_prelude::*;
 	pub type CannabisCount<T: Config> = StorageValue<_, u32>;
 
 	#[pallet::storage]
+	pub (super) type CannabisProductByCount<T> = StorageMap<_, Twox64Concat, u32, CannabisProduct>;
+
+	#[pallet::storage]
+	#[pallet::getter(fn get_terpene)]
 	pub (super) type Terpenes<T> = StorageMap<_, Twox64Concat, u128, Terpene>;
 
 	#[pallet::storage]
+	#[pallet::getter(fn get_cannabinoid)]
 	pub (super) type Cannabinoids<T> = StorageMap<_, Twox64Concat, u128, Cannabinoid>;
+
+	#[pallet::storage]
+	pub (super) type TerpeneByCount<T> = StorageMap<_, Twox64Concat, u32, Terpene>;
+
+	#[pallet::storage]
+	pub (super) type CannabinoidByCount<T> = StorageMap<_, Twox64Concat, u32, Cannabinoid>;
+
+	#[pallet::storage]
+	pub (super) type TerpeneCount<T> = StorageValue<_, u32>;
+
+	#[pallet::storage]
+	pub (super) type CannabinoidCount<T> = StorageValue<_, u32>;
 
 	// Pallets use events to inform users when important changes are made.
 	// https://substrate.dev/docs/en/knowledgebase/runtime/events
@@ -166,10 +185,13 @@ use frame_system::pallet_prelude::*;
 		/// Errors should have helpful documentation associated with them.
 		InvalidChapter,
 		InsufficientAmount,
+		ItemAlreadyExists
 	}
 
 	#[pallet::hooks]
-    impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {}
+    impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+		
+	}
 
 	// Dispatchable functions allows users to interact with the pallet and invoke state changes.
 	// These functions materialize as "extrinsics", which are often compared to transactions.
@@ -185,6 +207,7 @@ use frame_system::pallet_prelude::*;
 			id: u128, 
 			price: u32, 
 			inventory: u32, 
+			image_hash: Vec<u8>,
 			chain: Vec<AminoAcid>) -> DispatchResult {
 				// Check that the extrinsic was signed and get the signer.
 				// This function will return an error if the extrinsic is not signed.
@@ -192,11 +215,13 @@ use frame_system::pallet_prelude::*;
 				let who = ensure_signed(origin)?;
 				let who1 = &who.clone();
 				let who2 = who.clone();
+				ensure!(!Self::check_duplicate_peptide(&id), Error::<T>::ItemAlreadyExists);
 				let count = PeptideCount::<T>::get().unwrap_or(0);
 				let production_cost = Self::production_cost_calc(&chain).0;
 				let production_yield = Self::production_cost_calc(&chain).1;
 				let name1 = name.clone();
 				let chain1 = chain.clone();
+				let image_hash1 = image_hash.clone();
 				// Update storage.
 				Peptides::<T>::insert(id, (Peptide {
 					created_by: who,
@@ -204,6 +229,7 @@ use frame_system::pallet_prelude::*;
 					name,
 					price,
 					inventory,
+					image_hash
 				}, PeptideProfile {
 					peptide_ref: id.clone(),
 					chain,
@@ -217,6 +243,7 @@ use frame_system::pallet_prelude::*;
 					name: name1,
 					price,
 					inventory,
+					image_hash: image_hash1,
 				}, PeptideProfile {
 					peptide_ref: id.clone(),
 					chain: chain1,
@@ -231,16 +258,6 @@ use frame_system::pallet_prelude::*;
 				// Return a successful DispatchResultWithPostInfo
 				Ok(())
 			}
-		
-		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1))]
-		pub fn update_peptide_inventory(origin: OriginFor<T>, id: u128, inventory: u32) -> DispatchResult {
-			let who = ensure_signed(origin)?;
-			let mut peptide = Self::get_peptide(id);
-			peptide.0.inventory = inventory;
-			Self::deposit_event(Event::PeptideInventoryUpdate(peptide.clone()));
-			Peptides::<T>::insert(id, peptide);
-			Ok(())
-		}
 
 		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,3))]
 		pub fn create_amino(
@@ -249,6 +266,7 @@ use frame_system::pallet_prelude::*;
 			id: u128, 
 			cost: u32) -> DispatchResult {
 				let who = ensure_signed(origin)?;
+				ensure!(!Self::check_duplicate_amino(&id), Error::<T>::ItemAlreadyExists);
 				let count = AminoAcidCount::<T>::get().unwrap_or(0);
 				let count1 = count.clone();
 				let id1 = id.clone();
@@ -268,15 +286,6 @@ use frame_system::pallet_prelude::*;
 				AminoAcidCount::<T>::put(count1.clone() + 1);
 				Ok(())
 			}
-		
-		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,2))]
-		pub fn buy_products(origin: OriginFor<T>, total: u32, peptides: Vec<u128>, cannabis: Vec<u128>) -> DispatchResult {
-			let who = ensure_signed(origin)?;
-			let total_cost = Self::get_purchase_total(&peptides, &cannabis);
-			ensure!(total >= total_cost, Error::<T>::InsufficientAmount);
-			
-			Ok(())
-		}
 
 		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,2))]
 		pub fn new_cannabis_product(
@@ -290,18 +299,31 @@ use frame_system::pallet_prelude::*;
 			cannabinoids: Vec<(u128, u32)>, 
 			terpenes: Vec<(u128, u32)>) -> DispatchResult {
 				let who = ensure_signed(origin)?;
+				ensure!(!Self::check_duplicate_cannabis(&id), Error::<T>::ItemAlreadyExists);
+				let count = CannabisCount::<T>::get().unwrap_or(0);
 				Self::add_product_to_cannabinoid(&id, &cannabinoids);
 				Self::add_product_to_terpene(&id, &terpenes);
-				CannabisProducts::<T>::insert(id, CannabisProduct {
-					id,
-					name,
-					price,
-					category,
-					inventory,
-					image_hash,
-					cannabinoids,
-					terpenes,
+				CannabisProducts::<T>::insert(id.clone(), CannabisProduct {
+					id: id.clone(),
+					name: name.clone(),
+					price: price.clone(),
+					category: category.clone(),
+					inventory: inventory.clone(),
+					image_hash: image_hash.clone(),
+					cannabinoids: cannabinoids.clone(),
+					terpenes: terpenes.clone(),
 				});
+				CannabisProductByCount::<T>::insert(count.clone(), CannabisProduct {
+					id: id.clone(),
+					name: name.clone(),
+					price: price.clone(),
+					category: category.clone(),
+					inventory: inventory.clone(),
+					image_hash: image_hash.clone(),
+					cannabinoids: cannabinoids.clone(),
+					terpenes: terpenes.clone(),
+				});
+				CannabisCount::<T>::put(count + 1);
 				Ok(())
 		}
 		
@@ -312,12 +334,24 @@ use frame_system::pallet_prelude::*;
 			name: Vec<u8>, 
 			description: Vec<u8>) -> DispatchResult {
 				let who = ensure_signed(origin)?;
+				ensure!(!Self::check_duplicate_terpene(&id), Error::<T>::ItemAlreadyExists);
+				let count = TerpeneCount::<T>::get().unwrap_or(0);
+				let id1 = id.clone();
+				let name1 = name.clone();
+				let description1 = description.clone();
 				Terpenes::<T>::insert(id, Terpene {
 					id,
 					name,
 					description,
 					products: Vec::new(),
 				});
+				TerpeneByCount::<T>::insert(count.clone(), Terpene {
+					id: id1,
+					name: name1,
+					description: description1,
+					products: Vec::new(),
+				});
+				TerpeneCount::<T>::put(count + 1);
 				Ok(())
 		}
 		
@@ -328,19 +362,31 @@ use frame_system::pallet_prelude::*;
 			name: Vec<u8>, 
 			description: Vec<u8>) -> DispatchResult {
 				let who = ensure_signed(origin)?;
+				ensure!(!Self::check_duplicate_cannabinoid(&id), Error::<T>::ItemAlreadyExists);
+				let count = CannabinoidCount::<T>::get().unwrap_or(0);
+				let id1 = id.clone();
+				let name1 = name.clone();
+				let description1 = description.clone();
 				Cannabinoids::<T>::insert(id, Cannabinoid {
 					id,
 					name,
 					description,
 					products: Vec::new(),
 				});
+				CannabinoidByCount::<T>::insert(count.clone(), Cannabinoid {
+					id: id1,
+					name: name1,
+					description: description1,
+					products: Vec::new(),
+				});
+				CannabinoidCount::<T>::put(count + 1);
 				Ok(())
 		}
 	}
 
 	impl<T: Config> Pallet<T> {
 		//helpers
-		pub fn production_cost_calc(amino_chain: &Vec<AminoAcid>) -> (u32, u32) {
+		fn production_cost_calc(amino_chain: &Vec<AminoAcid>) -> (u32, u32) {
 			let mut total: u32 = 0;
 			let mut yld: f64 = 0.97;
 			for amino in amino_chain {
@@ -352,7 +398,7 @@ use frame_system::pallet_prelude::*;
 			(total, yld as u32)
 		}
 
-		pub fn add_product_to_terpene(id: &u128, terpenes: &Vec<(u128, u32)>) {
+		fn add_product_to_terpene(id: &u128, terpenes: &Vec<(u128, u32)>) {
 			for t in terpenes {
 				let mut terp = Terpenes::<T>::get(t.0).unwrap_or(Default::default());
 				terp.products.push((*id, t.1));
@@ -360,7 +406,7 @@ use frame_system::pallet_prelude::*;
 			}
 		}
 
-		pub fn add_product_to_cannabinoid(id: &u128, cannabinoids: &Vec<(u128, u32)>) {
+		fn add_product_to_cannabinoid(id: &u128, cannabinoids: &Vec<(u128, u32)>) {
 			for c in cannabinoids {
 				let mut cann = Cannabinoids::<T>::get(c.0).unwrap_or(Default::default());
 				cann.products.push((*id, c.1));
@@ -368,7 +414,7 @@ use frame_system::pallet_prelude::*;
 			}
 		}
 
-		pub fn get_purchase_total(peptides: &Vec<u128>, cannabis: &Vec<u128>) -> u32 {
+		fn get_purchase_total(peptides: &Vec<u128>, cannabis: &Vec<u128>) -> u32 {
 			let mut total: u32 = 0;
 			for id in peptides {
 				let pep = Self::get_peptide(id);
@@ -381,6 +427,49 @@ use frame_system::pallet_prelude::*;
 			total
 		}
 
-		
+		fn check_duplicate_peptide(id: &u128) -> bool {
+			let peptide = Self::get_peptide(id);
+			if peptide.0.name.len() > 0 {
+				true
+			} else {
+				false
+			}
+		}
+
+		fn check_duplicate_amino(id: &u128) -> bool {
+			let amino = Self::get_amino(id);
+			if amino.name.len() > 0 {
+				true
+			} else {
+				false
+			}
+		}
+
+		fn check_duplicate_terpene(id: &u128) -> bool {
+			let terpene = Self::get_terpene(id).unwrap_or(Default::default());
+			if terpene.name.len() > 0 {
+				true
+			} else {
+				false
+			}
+		}
+
+		fn check_duplicate_cannabinoid(id: &u128) -> bool {
+			let cannabinoid = Self::get_cannabinoid(id).unwrap_or(Default::default());
+			if cannabinoid.name.len() > 0 {
+				true
+			} else {
+				false
+			}
+		}
+
+		fn check_duplicate_cannabis(id: &u128) -> bool {
+			let cannabis = Self::get_cannabis_product(id).unwrap_or(Default::default());
+			if cannabis.name.len() > 0 {
+				true
+			} else {
+				false
+			}
+		}
 	}
 }
