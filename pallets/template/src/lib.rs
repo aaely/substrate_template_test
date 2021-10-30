@@ -4,58 +4,94 @@
 /// Learn more about FRAME and the core library of Substrate FRAME pallets:
 /// <https://substrate.dev/docs/en/knowledgebase/runtime/frame>
 pub use pallet::*;
-#[cfg(test)]
+/*#[cfg(test)]
 mod mock;
 
 #[cfg(test)]
 mod tests;
 
 #[cfg(feature = "runtime-benchmarks")]
-mod benchmarking;
-
+mosp_runtime::{offchain::storage::StorageValueRef, traits::StaticLookup}b mod pallet {
+*/
+//use frame_benchmarking::log::kv::Value;
 #[frame_support::pallet]
 pub mod pallet {
-	//use frame_benchmarking::log::kv::Value;
-use frame_support::pallet_prelude::*;
-use frame_system::{pallet_prelude::*};
+use frame_support::{Twox64Concat, pallet_prelude::*};
+use frame_system::{ensure_signed, pallet_prelude::*};
 use codec::{Encode, Decode};
 	
 	use sp_runtime::offchain::storage::StorageValueRef;
 use sp_std::prelude::*;
 	
 	#[derive(Debug, Clone, PartialEq, Default, Encode, Decode)]
-	pub struct User<AccountId, PhoneNumber, Email, Order> {
+	pub struct User<AccountId> {
 		address: AccountId,
 		fname: Vec<u8>,
 		lname: Vec<u8>,
-		phone: Vec<PhoneNumber>,
-		preferred_phone: u32,
-		email: Vec<Email>,
-		preferred_email: u32,
-		inventory: u32,
-		image_hash: Vec<u8>,
-		orders: Vec<Order>,
-	}
-
-	#[derive(Debug, Clone, PartialEq, Default, Encode, Decode)]
-	pub struct PhoneNumber<AccountId> {
-		user: AccountId,
-		phone_type: Vec<u8>,
-		number: Vec<u8>,
-	}
-
-	#[derive(Debug, Clone, PartialEq, Default, Encode, Decode)]
-	pub struct Email<AccountId> {
-		user: AccountId,
+		phone: Vec<u8>,
 		email: Vec<u8>,
+		handle: Vec<u8>,
+		handle_id: u128,
+		bio: Vec<u8>,
+		website: Vec<u8>,
+		profile_image: Vec<u8>,
+		total_orders: u32,
 	}
+
+	#[derive(Debug, Clone, PartialEq, Default, Encode, Decode)]
+	pub struct SellerStatistics<AccountId> {
+		reviewer: AccountId,
+		avg_rating: u32,
+		product_ref: u128,
+		total_stars: u32,
+		total_reviews: u32,
+	}
+
+	#[derive(Debug, Clone, PartialEq, Default, Encode, Decode)]
+	pub struct ProductStatistics<AccountId> {
+		reviewer: AccountId,
+		avg_rating: u32,
+		total_stars: u32,
+		total_reviews: u32,
+	}
+
+	#[derive(Debug, Clone, PartialEq, Default, Encode, Decode)]
+	pub struct Review<AccountId> {
+		reviewer: AccountId,
+		rating: u32,
+		product_ref: u128,
+		review: Vec<u8>,
+	}
+
+	#[derive(Debug, Clone, PartialEq, Encode, Decode, Default)]
+	pub struct Post<AccountId> {
+		author: AccountId,
+		likes: u32,
+		handle_tags: Vec<u128>,
+		hashtags: Vec<u128>,
+		content: Vec<u8>,
+		comments: Vec<u128>,
+		total_comments: u32,
+		images: Vec<Vec<u8>>,
+	}
+
+	/*impl Order {
+		pub fn build(
+			id: &u128, 
+			user: &T::AccountId, 
+			cannabis_products:&Vec<(u128, u32)>, 
+			peptide_products: &Vec<(u128, u32)>, 
+			total: u32,
+			date: Vec<u8>) -> Order {
+			
+		}
+	}*/
 
 	#[derive(Debug, Clone, PartialEq, Default, Encode, Decode)]
 	pub struct Order<AccountId> {
 		id: u128,
 		user: AccountId,
-		cannabis_products: Vec<(u128, u32)>,
-		peptide_products: Vec<(u128, u32)>,
+		products: Vec<(Vec<u8>, u32, u32)>,
 		total: u32,
 		date: Vec<u8>,
 	}
@@ -93,8 +129,8 @@ use sp_std::prelude::*;
 		category: CannabisCategory,
 		inventory: u32,
 		image_hash: Vec<u8>,
-		cannabinoids: Vec<(u128, u32)>,
-		terpenes: Vec<(u128, u32)>,
+		cannabinoids: Vec<(u128, Vec<u8>, u32)>,
+		terpenes: Vec<(u128, Vec<u8>, u32)>,
 	}
 
 	impl Default for CannabisProduct {
@@ -138,7 +174,7 @@ use sp_std::prelude::*;
 
 	/// Configure the pallet by specifying the parameters and types on which it depends.
 	#[pallet::config]
-	pub trait Config: frame_system::Config {
+	pub trait Config: frame_system::Config + pallet_balances::Config {
 		/// Because this pallet emits events, it depends on the runtime's definition of an event.
 		type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
 	}
@@ -179,7 +215,7 @@ use sp_std::prelude::*;
 	pub type CannabisCount<T: Config> = StorageValue<_, u32>;
 
 	#[pallet::storage]
-	pub (super) type CannabisProductByCount<T> = StorageMap<_, Twox64Concat, u32, CannabisProduct>;
+	pub type CannabisProductByCount<T> = StorageMap<_, Twox64Concat, u32, CannabisProduct>;
 
 	#[pallet::storage]
 	#[pallet::getter(fn get_terpene)]
@@ -190,16 +226,19 @@ use sp_std::prelude::*;
 	pub (super) type Cannabinoids<T> = StorageMap<_, Twox64Concat, u128, Cannabinoid>;
 
 	#[pallet::storage]
-	pub (super) type TerpeneByCount<T> = StorageMap<_, Twox64Concat, u32, Terpene>;
+	pub type TerpeneByCount<T> = StorageMap<_, Twox64Concat, u32, Terpene>;
 
 	#[pallet::storage]
-	pub (super) type CannabinoidByCount<T> = StorageMap<_, Twox64Concat, u32, Cannabinoid>;
+	pub type CannabinoidByCount<T> = StorageMap<_, Twox64Concat, u32, Cannabinoid>;
 
 	#[pallet::storage]
-	pub (super) type TerpeneCount<T> = StorageValue<_, u32>;
+	pub type TerpeneCount<T> = StorageValue<_, u32>;
 
 	#[pallet::storage]
-	pub (super) type CannabinoidCount<T> = StorageValue<_, u32>;
+	pub type UserCount<T> = StorageValue<_, u32>;
+
+	#[pallet::storage]
+	pub type CannabinoidCount<T> = StorageValue<_, u32>;
 
 	#[pallet::storage]
 	#[pallet::getter(fn get_admin)]
@@ -211,7 +250,28 @@ use sp_std::prelude::*;
 
 	#[pallet::storage]
 	#[pallet::getter(fn get_user)]
-	pub (super) type Users<T: Config> = StorageMap<_, Twox64Concat, T::AccountId, User<T::AccountId, PhoneNumber<T::AccountId>, Email<T::AccountId>, Order<T::AccountId>>, ValueQuery>;
+	pub (super) type Users<T: Config> = StorageMap<_, Twox64Concat, T::AccountId, User<T::AccountId>, ValueQuery>;
+
+	#[pallet::storage]
+	pub type Owner<T: Config> = StorageValue<_, T::AccountId>;
+
+	#[pallet::storage]
+	pub type Orders<T: Config> = StorageMap<_, Twox64Concat, u128, Order<T::AccountId>>;
+
+	#[pallet::storage]
+	pub type OrdersByUser<T: Config> = StorageMap<_, Twox64Concat, T::AccountId, Vec<Order<T::AccountId>>>;
+
+	#[pallet::storage]
+	pub type ProductReviews<T: Config> = StorageMap<_, Twox64Concat, u128, ProductStatistics<T::AccountId>>;
+
+	#[pallet::storage]
+	pub type ProductReviewCount<T> = StorageValue<_, u128>;
+	
+	#[pallet::storage]
+	pub (super) type OrderCount<T> = StorageValue<_, u128>;
+
+	#[pallet::storage]
+	pub type UserHandleAvailability<T> = StorageMap<_, Twox64Concat, u128, bool>;
 
 	// Pallets use events to inform users when important changes are made.
 	// https://substrate.dev/docs/en/knowledgebase/runtime/events
@@ -234,7 +294,10 @@ use sp_std::prelude::*;
 		/// Errors should have helpful documentation associated with them.
 		InvalidChapter,
 		InsufficientAmount,
-		ItemAlreadyExists
+		ItemAlreadyExists,
+		UserAlreadyExists,
+		InsufficientPriv,
+		HandleAlreadyExists,
 	}
 
 	#[pallet::hooks]
@@ -272,9 +335,9 @@ use sp_std::prelude::*;
 				let chain1 = chain.clone();
 				let image_hash1 = image_hash.clone();
 				// Update storage.
-				Peptides::<T>::insert(id, (Peptide {
+				Peptides::<T>::insert(id.clone(), (Peptide {
 					created_by: who,
-					id,
+					id: id.clone(),
 					name,
 					price,
 					inventory,
@@ -288,13 +351,13 @@ use sp_std::prelude::*;
 
 				PeptideByCount::<T>::insert(count.clone(), (Peptide {
 					created_by: who1.clone(),
-					id,
+					id: id.clone(),
 					name: name1,
 					price,
 					inventory,
 					image_hash: image_hash1,
 				}, PeptideProfile {
-					peptide_ref: id.clone(),
+					peptide_ref: id,
 					chain: chain1,
 					production_cost,
 					production_yield,
@@ -345,9 +408,9 @@ use sp_std::prelude::*;
 			category: CannabisCategory, 
 			inventory: u32, 
 			image_hash: Vec<u8>, 
-			cannabinoids: Vec<(u128, u32)>, 
-			terpenes: Vec<(u128, u32)>) -> DispatchResult {
-				let who = ensure_signed(origin)?;
+			cannabinoids: Vec<(u128, Vec<u8>, u32)>, 
+			terpenes: Vec<(u128, Vec<u8>, u32)>) -> DispatchResult {
+				ensure_signed(origin)?;
 				ensure!(!Self::check_duplicate_cannabis(&id), Error::<T>::ItemAlreadyExists);
 				let count = CannabisCount::<T>::get().unwrap_or(0);
 				Self::add_product_to_cannabinoid(&id, &cannabinoids);
@@ -383,6 +446,7 @@ use sp_std::prelude::*;
 			name: Vec<u8>, 
 			description: Vec<u8>) -> DispatchResult {
 				let who = ensure_signed(origin)?;
+				//ensure!(Self::get_admin(who.clone()), Error::<T>::InsufficientPriv);
 				ensure!(!Self::check_duplicate_terpene(&id), Error::<T>::ItemAlreadyExists);
 				let count = TerpeneCount::<T>::get().unwrap_or(0);
 				let id1 = id.clone();
@@ -431,6 +495,100 @@ use sp_std::prelude::*;
 				CannabinoidCount::<T>::put(count + 1);
 				Ok(())
 		}
+
+		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,2))]
+		pub fn new_user(
+			origin: OriginFor<T>, 
+			fname: Vec<u8>, 
+			lname: Vec<u8>, 
+			phone: Vec<u8>, 
+			email: Vec<u8>,
+			handle: Vec<u8>,
+			handle_id: u128,
+			bio: Vec<u8>,
+			website: Vec<u8>,
+			profile_image: Vec<u8>) -> DispatchResult {
+				let who = ensure_signed(origin)?;
+				ensure!(!Self::check_duplicate_user(&who), Error::<T>::UserAlreadyExists);
+				ensure!(!Self::check_is_user(&who), Error::<T>::InsufficientPriv);
+				
+				let count = UserCount::<T>::get().unwrap_or(0);
+				Users::<T>::insert(who.clone(), User {
+					address: who.clone(),
+					fname,
+					lname,
+					phone,
+					email,
+					handle,
+					handle_id,
+					bio,
+					website,
+					profile_image,
+					total_orders: 0,
+				});
+				UserHandleAvailability::<T>::insert(handle_id, true);
+				UserCount::<T>::put(count + 1);
+				Ok(())
+			}
+
+		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,2))]
+		pub fn edit_user(
+			origin: OriginFor<T>, 
+			fname: Vec<u8>, 
+			lname: Vec<u8>, 
+			phone: Vec<u8>, 
+			email: Vec<u8>,
+			handle: Vec<u8>,
+			bio: Vec<u8>,
+			website: Vec<u8>,
+			handle_id: u128,
+			profile_image: Vec<u8>,
+			total_orders: u32) -> DispatchResult {
+				let who = ensure_signed(origin)?;
+				ensure!(!Self::check_is_user(&who), Error::<T>::InsufficientPriv);				
+				Users::<T>::insert(who.clone(), User {
+					address: who.clone(),
+					fname,
+					lname,
+					phone,
+					email,
+					handle,
+					handle_id,
+					bio,
+					website,
+					profile_image,
+					total_orders,
+				});
+				UserHandleAvailability::<T>::insert(handle_id, true);
+				Ok(())
+			}
+		
+		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(3,3))]
+		pub fn purchase(
+			origin: OriginFor<T>, 
+			products: Vec<(Vec<u8>, u32, u32)>,
+			date: Vec<u8>) -> DispatchResult {
+				let who = ensure_signed(origin.clone())?;
+				let total = Self::get_purchase_total(&products);
+			//	pallet_balances::Pallet::<T>::transfer(origin, Owner::<T>::get() as <<T as frame_system::Config>::Lookup as sp_runtime::traits::StaticLookup>::Source, total as T::Balance);
+				let count = OrderCount::<T>::get().unwrap_or(0);
+				Orders::<T>::insert(count.clone() as u128, Order {
+					id: count.clone(),
+					user: who.clone(),
+					products,
+					total,
+					date,
+				});
+				let order = Orders::<T>::get(count.clone()).unwrap_or(Default::default());
+				let mut orders = OrdersByUser::<T>::get(who.clone()).unwrap_or(Default::default());
+				orders.push(order);
+				let mut user = Self::get_user(who.clone());
+				user.total_orders += 1;
+				Users::<T>::insert(who.clone(), user);
+				OrdersByUser::<T>::insert(who.clone(), orders);
+				OrderCount::<T>::put(count + 1);
+				Ok(())
+			}
 	}
 
 	impl<T: Config> Pallet<T> {
@@ -447,31 +605,26 @@ use sp_std::prelude::*;
 			(total, yld as u32)
 		}
 
-		fn add_product_to_terpene(id: &u128, terpenes: &Vec<(u128, u32)>) {
+		fn add_product_to_terpene(id: &u128, terpenes: &Vec<(u128, Vec<u8>, u32)>) {
 			for t in terpenes {
 				let mut terp = Terpenes::<T>::get(t.0).unwrap_or(Default::default());
-				terp.products.push((*id, t.1));
+				terp.products.push((*id, t.2));
 				Terpenes::<T>::insert(t.0, terp);
 			}
 		}
 
-		fn add_product_to_cannabinoid(id: &u128, cannabinoids: &Vec<(u128, u32)>) {
+		fn add_product_to_cannabinoid(id: &u128, cannabinoids: &Vec<(u128, Vec<u8>, u32)>) {
 			for c in cannabinoids {
 				let mut cann = Cannabinoids::<T>::get(c.0).unwrap_or(Default::default());
-				cann.products.push((*id, c.1));
+				cann.products.push((*id, c.2));
 				Cannabinoids::<T>::insert(c.0, cann);
 			}
 		}
 
-		fn get_purchase_total(peptides: &Vec<u128>, cannabis: &Vec<u128>) -> u32 {
+		fn get_purchase_total(products: &Vec<(Vec<u8>, u32, u32)>) -> u32 {
 			let mut total: u32 = 0;
-			for id in peptides {
-				let pep = Self::get_peptide(id);
-				total += pep.0.price;
-			}
-			for _id in cannabis {
-				let cann = Self::get_cannabis_product(_id).unwrap_or(Default::default());
-				total += cann.price;
+			for i in products {
+				total += i.1 * i.2;
 			}
 			total
 		}
@@ -515,6 +668,28 @@ use sp_std::prelude::*;
 		fn check_duplicate_cannabis(id: &u128) -> bool {
 			let cannabis = Self::get_cannabis_product(id).unwrap_or(Default::default());
 			if cannabis.name.len() > 0 {
+				true
+			} else {
+				false
+			}
+		}
+
+		fn check_duplicate_user(id: &T::AccountId) -> bool {
+			let user = Self::get_user(id);
+			if user.fname.len() > 0 {
+				true
+			} else {
+				false
+			}
+		}
+
+		fn check_duplicate_handle(id: &u128) -> bool {
+			UserHandleAvailability::<T>::get(id).unwrap_or(false)
+		}
+
+		fn check_is_user(id: &T::AccountId) -> bool {
+			let user = Users::<T>::get(id);
+			if user.address.eq(id) {
 				true
 			} else {
 				false
