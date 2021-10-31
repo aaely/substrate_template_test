@@ -64,15 +64,24 @@ use sp_std::prelude::*;
 	}
 
 	#[derive(Debug, Clone, PartialEq, Encode, Decode, Default)]
-	pub struct Post<AccountId> {
+	pub struct Post<AccountId, Comments> {
 		author: AccountId,
+		id: u128,
 		likes: u32,
 		handle_tags: Vec<u128>,
 		hashtags: Vec<u128>,
 		content: Vec<u8>,
-		comments: Vec<u128>,
+		comments: Vec<Comments>,
 		total_comments: u32,
 		images: Vec<Vec<u8>>,
+	}
+
+	#[derive(Debug, Clone, PartialEq, Encode, Decode, Default)]
+	pub struct Comments<AccountId> {
+		author: AccountId,
+		post_id: u128,
+		comment: Vec<u8>,
+		likes: u32,
 	}
 
 	/*impl Order {
@@ -212,10 +221,34 @@ use sp_std::prelude::*;
 	pub (super) type CannabisProducts<T> = StorageMap<_, Twox64Concat, u128, CannabisProduct>;
 
 	#[pallet::storage]
+	#[pallet::getter(fn get_user_posts)]
+	pub (super) type Posts<T: Config> = StorageMap<_, Twox64Concat, T::AccountId, Vec<Post<T::AccountId, Comments<T::AccountId>>>>;
+
+	#[pallet::storage]
+	pub type PostByCount<T: Config> = StorageMap<_, Twox64Concat, u128, Post<T::AccountId, Comments<T::AccountId>>>;
+
+	#[pallet::storage]
+	pub type CommentsForPost<T: Config> = StorageDoubleMap<_, Twox64Concat, u128, Twox64Concat, T::AccountId, Comments<T::AccountId>>;
+
+	#[pallet::storage]
+	#[pallet::getter(fn get_user_following)]
+	pub type Following<T: Config> = StorageDoubleMap<_, Twox64Concat, T::AccountId, Twox64Concat, u128, Vec<T::AccountId>>;
+
+	#[pallet::storage]
+	#[pallet::getter(fn get_user_followers)]
+	pub type Followers<T: Config> = StorageDoubleMap<_, Twox64Concat, T::AccountId, Twox64Concat, u128, Vec<T::AccountId>>;
+
+	#[pallet::storage]
 	pub type CannabisCount<T: Config> = StorageValue<_, u32>;
 
 	#[pallet::storage]
+	pub type PostCount<T: Config> = StorageValue<_, u128>;
+
+	#[pallet::storage]
 	pub type CannabisProductByCount<T> = StorageMap<_, Twox64Concat, u32, CannabisProduct>;
+
+	#[pallet::storage]
+	pub type CannabisProductsByCategory<T> = StorageMap<_, Twox64Concat, CannabisCategory, Vec<CannabisProduct>>;
 
 	#[pallet::storage]
 	#[pallet::getter(fn get_terpene)]
@@ -266,11 +299,15 @@ use sp_std::prelude::*;
 
 	#[pallet::storage]
 	pub type ProductReviewCount<T> = StorageValue<_, u128>;
+
+	#[pallet::storage]
+	pub type HashtagPosts<T: Config> = StorageMap<_, Twox64Concat ,u128, Vec<Post<T::AccountId, Comments<T::AccountId>>>>;
 	
 	#[pallet::storage]
 	pub (super) type OrderCount<T> = StorageValue<_, u128>;
 
 	#[pallet::storage]
+	#[pallet::getter(fn get_user_handle_availability)]
 	pub type UserHandleAvailability<T> = StorageMap<_, Twox64Concat, u128, bool>;
 
 	// Pallets use events to inform users when important changes are made.
@@ -435,6 +472,24 @@ use sp_std::prelude::*;
 					cannabinoids: cannabinoids.clone(),
 					terpenes: terpenes.clone(),
 				});
+				let product = CannabisProductByCount::<T>::get(count.clone()).unwrap_or(Default::default());
+				match product.category {
+					CannabisCategory::Flower => {
+						let mut products = CannabisProductsByCategory::<T>::get(CannabisCategory::Flower).unwrap_or(Default::default());
+						products.push(product);
+						CannabisProductsByCategory::<T>::insert(CannabisCategory::Flower, products);
+					},
+					CannabisCategory::CO2Extract => {
+						let mut products = CannabisProductsByCategory::<T>::get(CannabisCategory::CO2Extract).unwrap_or(Default::default());
+						products.push(product);
+						CannabisProductsByCategory::<T>::insert(CannabisCategory::CO2Extract, products);
+					},
+					CannabisCategory::ButaneExtract => {
+						let mut products = CannabisProductsByCategory::<T>::get(CannabisCategory::ButaneExtract).unwrap_or(Default::default());
+						products.push(product);
+						CannabisProductsByCategory::<T>::insert(CannabisCategory::ButaneExtract, products);
+					},
+				}
 				CannabisCount::<T>::put(count + 1);
 				Ok(())
 		}
@@ -510,7 +565,7 @@ use sp_std::prelude::*;
 			profile_image: Vec<u8>) -> DispatchResult {
 				let who = ensure_signed(origin)?;
 				ensure!(!Self::check_duplicate_user(&who), Error::<T>::UserAlreadyExists);
-				ensure!(!Self::check_is_user(&who), Error::<T>::InsufficientPriv);
+				ensure!(!Self::get_user_handle_availability(&handle_id).unwrap_or(Default::default()), Error::<T>::HandleAlreadyExists);
 				
 				let count = UserCount::<T>::get().unwrap_or(0);
 				Users::<T>::insert(who.clone(), User {
@@ -580,18 +635,85 @@ use sp_std::prelude::*;
 					date,
 				});
 				let order = Orders::<T>::get(count.clone()).unwrap_or(Default::default());
-				let mut orders = OrdersByUser::<T>::get(who.clone()).unwrap_or(Default::default());
-				orders.push(order);
-				let mut user = Self::get_user(who.clone());
-				user.total_orders += 1;
-				Users::<T>::insert(who.clone(), user);
-				OrdersByUser::<T>::insert(who.clone(), orders);
+				Self::add_order_to_user_orders(&order, &who);
 				OrderCount::<T>::put(count + 1);
 				Ok(())
 			}
+
+		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(3,3))]
+		pub fn new_post(
+			origin: OriginFor<T>,
+			id: u128,
+			handle_tags: Vec<u128>,
+			hashtags: Vec<u128>,
+			content: Vec<u8>,
+			images: Vec<Vec<u8>>,
+		) -> DispatchResult {
+			let who = ensure_signed(origin)?;
+			let count = PostCount::<T>::get().unwrap_or(0);
+			PostByCount::<T>::insert(count, Post {
+				author: who.clone(),
+				id,
+				likes: 0,
+				handle_tags,
+				hashtags: hashtags.clone(),
+				content,
+				comments: Vec::new(),
+				total_comments: 0,
+				images,
+			});
+			let post = PostByCount::<T>::get(count).unwrap_or(Default::default());
+			Self::add_to_user_posts(&post, &who);
+			Self::add_to_hashtag_posts(&hashtags, &post);
+			Ok(())
+		}
+
+		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(3,3))]
+		pub fn new_comment(
+			origin: OriginFor<T>,
+			post_id: u128,
+			comment: Vec<u8>,
+			post_author: T::AccountId,
+		) -> DispatchResult {
+			let who = ensure_signed(origin)?;
+			CommentsForPost::<T>::insert(post_id.clone(), post_author ,Comments {
+				author: who,
+				post_id,
+				comment,
+				likes: 0,
+			});
+			Ok(())
+		}
+
+		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(3,3))]
+		pub fn follow(
+			origin: OriginFor<T>,
+			user_handle_id: u128,
+			user_to_follow: T::AccountId,
+			user_to_follow_handle_id: u128,
+		) -> DispatchResult {
+			let who = ensure_signed(origin)?;
+			let mut following = Following::<T>::get(who.clone(), user_handle_id.clone()).unwrap_or(Default::default());
+			let mut followers = Followers::<T>::get(user_to_follow.clone(), user_to_follow_handle_id.clone()).unwrap_or(Default::default());
+			following.push(user_to_follow.clone());
+			followers.push(who.clone());
+			Following::<T>::insert(who, user_handle_id, following);
+			Followers::<T>::insert(user_to_follow, user_to_follow_handle_id, followers);
+			Ok(())
+		}
 	}
 
 	impl<T: Config> Pallet<T> {
+
+		fn add_order_to_user_orders(order: &Order<T::AccountId>, user: &T::AccountId) {
+			let mut _user = Self::get_user(user);
+			let mut orders = OrdersByUser::<T>::get(user).unwrap_or(Default::default());
+			_user.total_orders += 1;
+			let _order = order.clone();
+			orders.push(_order);
+			OrdersByUser::<T>::insert(user, orders);
+			Users::<T>::insert(user, _user);
+		}
 		//helpers
 		fn production_cost_calc(amino_chain: &Vec<AminoAcid>) -> (u32, u32) {
 			let mut total: u32 = 0;
@@ -603,6 +725,22 @@ use sp_std::prelude::*;
 			yld = yld / 0.97;
 			yld = yld * 100.0;
 			(total, yld as u32)
+		}
+
+		fn add_to_hashtag_posts(ht: &Vec<u128>, post: &Post<T::AccountId, Comments<T::AccountId>>) {
+			for h in ht {
+				let mut ht_posts = HashtagPosts::<T>::get(h).unwrap_or(Default::default());
+				let post_c = post.clone();
+				ht_posts.push(post_c);
+				HashtagPosts::<T>::insert(h, ht_posts);
+			}
+		}
+
+		fn add_to_user_posts(post: &Post<T::AccountId, Comments<T::AccountId>>, user: &T::AccountId) {
+			let mut posts = Posts::<T>::get(user).unwrap_or(Default::default());
+			let post_c = post.clone();
+			posts.push(post_c);
+			Posts::<T>::insert(user, posts);
 		}
 
 		fn add_product_to_terpene(id: &u128, terpenes: &Vec<(u128, Vec<u8>, u32)>) {
