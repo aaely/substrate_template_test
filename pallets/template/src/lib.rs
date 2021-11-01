@@ -39,26 +39,32 @@ use sp_std::prelude::*;
 	}
 
 	#[derive(Debug, Clone, PartialEq, Default, Encode, Decode)]
-	pub struct SellerStatistics<AccountId> {
+	pub struct SellerStatistics {
+		avg_rating: u8,
+		total_stars: u32,
+		total_reviews: u32,
+	}
+
+	#[derive(Debug, Clone, PartialEq, Default, Encode, Decode)]
+	pub struct ProductStatistics {
+		avg_rating: u8,
+		total_stars: u32,
+		total_reviews: u32,
+	}
+
+	#[derive(Debug, Clone, PartialEq, Default, Encode, Decode)]
+	pub struct ProductReview<AccountId> {
 		reviewer: AccountId,
-		avg_rating: u32,
+		rating: u8,
 		product_ref: u128,
-		total_stars: u32,
-		total_reviews: u32,
+		review: Vec<u8>,
 	}
 
 	#[derive(Debug, Clone, PartialEq, Default, Encode, Decode)]
-	pub struct ProductStatistics<AccountId> {
+	pub struct SellerReview<AccountId> {
 		reviewer: AccountId,
-		avg_rating: u32,
-		total_stars: u32,
-		total_reviews: u32,
-	}
-
-	#[derive(Debug, Clone, PartialEq, Default, Encode, Decode)]
-	pub struct Review<AccountId> {
-		reviewer: AccountId,
-		rating: u32,
+		seller: AccountId,
+		rating: u8,
 		product_ref: u128,
 		review: Vec<u8>,
 	}
@@ -201,6 +207,14 @@ use sp_std::prelude::*;
 	pub (super) type Peptides<T: Config> = StorageMap<_, Twox64Concat, u128, (Peptide<T::AccountId>, PeptideProfile<AminoAcid>), ValueQuery>;
 
 	#[pallet::storage]
+	#[pallet::getter(fn get_product_reviews)]
+	pub (super) type ProductReviews<T: Config> = StorageMap<_, Twox64Concat, u128, Vec<ProductReview<T::AccountId>>, ValueQuery>;
+
+	#[pallet::storage]
+	#[pallet::getter(fn get_seller_reviews)]
+	pub (super) type SellerReviews<T: Config> = StorageMap<_, Twox64Concat, u128, Vec<SellerReview<T::AccountId>>, ValueQuery>;
+
+	#[pallet::storage]
 	#[pallet::getter(fn get_amino)]
 	pub (super) type AminoAcids<T> = StorageMap<_, Twox64Concat, u128, AminoAcid, ValueQuery>;
 
@@ -295,9 +309,6 @@ use sp_std::prelude::*;
 	pub type OrdersByUser<T: Config> = StorageMap<_, Twox64Concat, T::AccountId, Vec<Order<T::AccountId>>>;
 
 	#[pallet::storage]
-	pub type ProductReviews<T: Config> = StorageMap<_, Twox64Concat, u128, ProductStatistics<T::AccountId>>;
-
-	#[pallet::storage]
 	pub type ProductReviewCount<T> = StorageValue<_, u128>;
 
 	#[pallet::storage]
@@ -319,8 +330,8 @@ use sp_std::prelude::*;
 		/// Event documentation should end with an array that provides descriptive names for event
 		/// parameters. [something, who]
 		NewPeptide(u32, T::AccountId),
-		NewAmino(u32, T::AccountId),
-		PeptideInventoryUpdate((Peptide<T::AccountId>, PeptideProfile<AminoAcid>)),
+		//NewAmino(&u32, &T::AccountId),
+		//PeptideInventoryUpdate(&(Peptide<T::AccountId>, PeptideProfile<AminoAcid>)),
 	}
 
 	// Errors inform users that something went wrong.
@@ -362,15 +373,10 @@ use sp_std::prelude::*;
 				// This function will return an error if the extrinsic is not signed.
 				// https://substrate.dev/docs/en/knowledgebase/runtime/origin
 				let who = ensure_signed(origin)?;
-				let who1 = &who.clone();
-				let who2 = who.clone();
 				ensure!(!Self::check_duplicate_peptide(&id), Error::<T>::ItemAlreadyExists);
 				let count = PeptideCount::<T>::get().unwrap_or(0);
 				let production_cost = Self::production_cost_calc(&chain).0;
 				let production_yield = Self::production_cost_calc(&chain).1;
-				let name1 = name.clone();
-				let chain1 = chain.clone();
-				let image_hash1 = image_hash.clone();
 				// Update storage.
 				Peptides::<T>::insert(id.clone(), (Peptide {
 					created_by: who,
@@ -385,26 +391,10 @@ use sp_std::prelude::*;
 					production_cost,
 					production_yield,
 				}));
-
-				PeptideByCount::<T>::insert(count.clone(), (Peptide {
-					created_by: who1.clone(),
-					id: id.clone(),
-					name: name1,
-					price,
-					inventory,
-					image_hash: image_hash1,
-				}, PeptideProfile {
-					peptide_ref: id,
-					chain: chain1,
-					production_cost,
-					production_yield,
-				}));
-
-				PeptideCount::<T>::put(count + 1);
-
-				// Emit an event
-				Self::deposit_event(Event::NewPeptide(count.clone(), who2));
-				// Return a successful DispatchResultWithPostInfo
+				let peptide = Peptides::<T>::get(id);
+				Self::add_peptide_by_count(&count, &peptide);
+				//Self::deposit_event(Event::NewPeptide(&count, &who));
+				PeptideCount::<T>::put(count + 1);				
 				Ok(())
 			}
 
@@ -417,22 +407,16 @@ use sp_std::prelude::*;
 				let who = ensure_signed(origin)?;
 				ensure!(!Self::check_duplicate_amino(&id), Error::<T>::ItemAlreadyExists);
 				let count = AminoAcidCount::<T>::get().unwrap_or(0);
-				let count1 = count.clone();
 				let id1 = id.clone();
-				let cost1 = cost.clone();
-				let name1 = name.clone();
 				AminoAcids::<T>::insert(id, AminoAcid {
 					id,
 					name,
 					cost,
 				});
-				AminoAcidByCount::<T>::insert(count, AminoAcid {
-					id: id1,
-					name: name1,
-					cost: cost1,
-				});
-				Self::deposit_event(Event::NewAmino(count1.clone(), who));
-				AminoAcidCount::<T>::put(count1.clone() + 1);
+				let amino = AminoAcids::<T>::get(id1);
+				Self::add_amino_by_count(&count, &amino);
+				//Self::deposit_event(Event::NewAmino(&count, &who));
+				AminoAcidCount::<T>::put(count + 1);
 				Ok(())
 			}
 
@@ -643,7 +627,6 @@ use sp_std::prelude::*;
 		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(3,3))]
 		pub fn new_post(
 			origin: OriginFor<T>,
-			id: u128,
 			handle_tags: Vec<u128>,
 			hashtags: Vec<u128>,
 			content: Vec<u8>,
@@ -653,7 +636,7 @@ use sp_std::prelude::*;
 			let count = PostCount::<T>::get().unwrap_or(0);
 			PostByCount::<T>::insert(count, Post {
 				author: who.clone(),
-				id,
+				id: count.clone(),
 				likes: 0,
 				handle_tags,
 				hashtags: hashtags.clone(),
@@ -665,6 +648,7 @@ use sp_std::prelude::*;
 			let post = PostByCount::<T>::get(count).unwrap_or(Default::default());
 			Self::add_to_user_posts(&post, &who);
 			Self::add_to_hashtag_posts(&hashtags, &post);
+			PostCount::<T>::put(count + 1);
 			Ok(())
 		}
 
@@ -794,6 +778,20 @@ use sp_std::prelude::*;
 			}
 		}
 
+		fn add_peptide_by_count(
+			count: &u32, 
+			peptide: &(Peptide<T::AccountId>, PeptideProfile<AminoAcid>)
+			) {
+				PeptideByCount::<T>::insert(count, peptide);
+		}
+
+		fn add_amino_by_count(
+			count: &u32,
+			amino: &AminoAcid
+		) {
+			AminoAcidByCount::<T>::insert(count, amino)
+		}
+
 		fn check_duplicate_cannabinoid(id: &u128) -> bool {
 			let cannabinoid = Self::get_cannabinoid(id).unwrap_or(Default::default());
 			if cannabinoid.name.len() > 0 {
@@ -833,5 +831,19 @@ use sp_std::prelude::*;
 				false
 			}
 		}
+
+		/*fn calculate_average_rating_seller(this_rating: &u8, total_ratings: u32, seller: &T::AccountId) -> u8 {
+			let mut total_rating = SellerRatings::<T>::get(seller).unwrap_or(Default::default());
+			total_rating += this_rating as u32;
+			total_rating = total_rating / total_ratings;
+			total_rating as u8
+		}
+
+		fn calculate_average_rating_product(this_rating: &u8, total_ratings: u32, product: &u128) -> u8 {
+			let mut total_rating = ProductStatistics::<T>::get(product).unwrap_or(Default::default());
+			total_rating += this_rating as u32;
+			total_rating = total_rating / total_ratings;
+			total_rating as u8
+		}*/
 	}
 }
